@@ -1,84 +1,449 @@
-// [_Command-line flags_](http://en.wikipedia.org/wiki/Command-line_interface#Command-line_option)
-// are a common way to specify options for command-line
-// programs. For example, in `wc -l` the `-l` is a
-// command-line flag.
+/* 
+TODO:
+ - Login credentials
+     * Save in a hidden file (.crane in HOME directory)
+     * Manage properties
+	 * Manage files
+ - Try to modularize the tool
+ - Template for help
+ - Template for usage
+ - Try to output the progress and some output sentences
+     * Implement the verbose option      
+*/
 
 package main
 
-// Go provides a `flag` package supporting basic
-// command-line flag parsing. We'll use this package to
-// implement our example command-line program.
-import "flag"
-import "fmt"
-//import "bufio"
-//import "os"
-//import "gopass"
-import "net/http"
-import "bytes"
+import (
+	"os"
+	"fmt"
+	// More than logging is output
+	//"log"
+	"bytes"
+	"net/http"
+	"io/ioutil"
+	"text/tabwriter"
+	"encoding/xml"
+	"github.com/spf13/cobra"
+	//"github.com/MidVision/crane/webservices"
+)
+
+type (
+	Authentication struct {
+		Username string `xml:"username"`
+		Password string `xml:"password"`
+	}	
+
+	EnvelopeHeader struct {
+		Credentials Authentication `xml:"get:authentication"`
+	}		
+
+	EnvelopeBody struct {
+		Payload interface{}		`xml:"get:ListImages"`
+	}
+
+	Envelope struct {
+		XMLName	xml.Name			`xml:"soapenv:Envelope"`
+		SoapEnv		string			`xml:"xmlns:soapenv,attr"`
+		CraneEnv	string			`xml:"xmlns:get,attr"`
+		Header		EnvelopeHeader	`xml:"soapenv:Header"`
+		Body		EnvelopeBody	`xml:"soapenv:Body"`
+	}
+)
+
+var (
+	//SOAP Envelope
+	envelope *Envelope
+	
+	//Subcommand
+	loginCmd  *cobra.Command
+	listImagesCmd  *cobra.Command
+	showImageCmd  *cobra.Command
+	listContainersCmd  *cobra.Command
+	showContainerCmd  *cobra.Command
+	listHarborsCmd  *cobra.Command
+	showHarborCmd  *cobra.Command
+	listClustersCmd  *cobra.Command
+	showClusterCmd  *cobra.Command
+	listEnginesCmd  *cobra.Command
+	showEngineCmd  *cobra.Command
+	listShippingLanesCmd  *cobra.Command
+	showShippingLaneCmd  *cobra.Command
+	listVesselsCmd  *cobra.Command
+	showVesselCmd  *cobra.Command
+	deployCmd  *cobra.Command
+	stopCmd  *cobra.Command
+	startCmd  *cobra.Command
+	restartCmd  *cobra.Command
+	resizeCmd  *cobra.Command
+	
+	//Flags
+	version bool
+	debug bool = false
+	
+	username string
+	password string
+	url string	
+)
+
+func init() {
+	envelope = new(Envelope)
+	envelope.SoapEnv = "http://schemas.xmlsoap.org/soap/envelope/"
+	envelope.CraneEnv = "http://getcrane.com/"
+	envelope.Header = EnvelopeHeader{}
+	envelope.Header.Credentials = Authentication{}
+}
 
 func main() {
 
-    //reader := bufio.NewReader(os.Stdin)
-	
-    // Basic flag declarations are available for string,
-    // integer, and boolean options. Here we declare a
-    // string flag `word` with a default value `"foo"`
-    // and a short description. This `flag.String` function
-    // returns a string pointer (not a string value);
-    // we'll see how to use this pointer below.
-    username := flag.String("username", "harbor", "The username used to log into Crane.")
-    password := flag.String("password", "mypass", "The password used to log into Crane.")
-    url := flag.String("url", "http://app.getcrane.com", "The URL used to log into Crane.")
-    //auth := flag.String("auth", "unsetDefault", "Set the authentication credentials to log in to Crane")
-    // This declares `numb` and `fork` flags, using a
-    // similar approach to the `word` flag.
-    numbPtr := flag.Int("numb", 42, "an int")
-    boolPtr := flag.Bool("fork", false, "a bool")
-
-    // It's also possible to declare an option that uses an
-    // existing var declared elsewhere in the program.
-    // Note that we need to pass in a pointer to the flag
-    // declaration function.
-    var svar string
-    flag.StringVar(&svar, "svar", "bar", "a string var")
-
-    // Once all flags are declared, call `flag.Parse()`
-    // to execute the command-line parsing.
-    flag.Parse()
-
-    // Here we'll just dump out the parsed options and
-    // any trailing positional arguments. Note that we
-    // need to dereference the points with e.g. `*wordPtr`
-    // to get the actual option values.
-    fmt.Println("Username:", *username)
-    fmt.Println("Password:", *password)
-    fmt.Println("URL:", *url)
-    fmt.Println("numb:", *numbPtr)
-    fmt.Println("fork:", *boolPtr)
-    fmt.Println("svar:", svar)
-    fmt.Println("tail:", flag.Args())
-	
-	reader := bytes.NewBufferString("<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:exam=\"http://www.example.com/\"><soapenv:Header><exam:authentication><username>" + *username + "</username><password>" + *password + "</password></exam:authentication></soapenv:Header><soapenv:Body><exam:WS_StartVoyage><ShippingLaneName>aws-shipping-lane-rd-dev</ShippingLaneName></exam:WS_StartVoyage></soapenv:Body></soapenv:Envelope>")
-	
-	resp, err := http.Post(*url, "encoding/xml", reader)
-	
-	if err != nil {
-		fmt.Println(resp)
-		fmt.Println(err)
+	//login
+	loginCmd = &cobra.Command{
+		Use:   "login",
+		Short: "Performs a login to the Harbormaster server.",
+		Long:  "This command performs a login to the Harbormaster server.\n\nOnce logged in you won't need to run this command again unless you want to connect to a different server, the credentials are kept during the session.\n\nRunning this command again with different parameters will result in a new login to a different server losing the previous session.",
+		Run:	func(cmd *cobra.Command, args []string) {
+			if username != "" && password != "" && url != "" {
+				fmt.Println("\n************************************************")
+				fmt.Printf("* Login performed as '%s/%s' to '%s'.\n", username, password, url)
+				fmt.Println("************************************************")
+			} else {
+				cmd.Help()
+			}
+		},
 	}
+	
+	// TODO: remove the default values
+	loginCmd.Flags().StringVarP(&username, "username", "", "harborWS", "User name to connect to Harbormaster.")
+	loginCmd.Flags().StringVarP(&password, "password", "", "123456Ab", "Password to connect to Harbormaster.")
+	loginCmd.Flags().StringVarP(&url, "url", "", "http://localhost:8080/ws/HarborMaster", "URL to Harbormaster.")
+	
+	//listImages
+	listImagesCmd = &cobra.Command{
+		Use:   "listImages",
+		Short: "Shows the Repository Overview of Harbormaster.",
+		Long:  "This command shows all the Images contained in Harbormaster.",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("Printing the list of available container images...\n")
+			
+			envelope.Header.Credentials.Username = username
+			envelope.Header.Credentials.Password = password
+			
+			type ListImages struct {}
+			
+			payload := ListImages{}
 
-	/*
-    if *auth == "unsetDefault" {
-        fmt.Print("Username:", )
-        username, _ := reader.ReadString('\n')
-        password, _ := gopass.GetPass("Password:")
-         fmt.Print("URL:", )
-        url, _ := reader.ReadString('\n')
+			envelope.Body.Payload = payload
+			
+			buffer := &bytes.Buffer{}
+			encoder := xml.NewEncoder(buffer)
+			encoder.Indent("  ", "    ")
+			err := encoder.Encode(envelope)
+			if err != nil {
+				fmt.Println("Could not encode request")
+			}
+			
+			if debug {
+				fmt.Printf("[DEBUG] Request:\n\n%v\n\n", buffer)
+			}
+			
+			client := http.Client{}
+			req, err := http.NewRequest("POST", url, buffer)
+			if err != nil {
+				fmt.Println(err.Error())
+			}
 
-        fmt.Println("Username:", username)
-        fmt.Println("Password:", password)
-        fmt.Println("Url:", url)
-    }
-	*/
+			req.Header.Add("Content-Type", "text/xml")
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			if resp.StatusCode != 200 {
+				fmt.Println(resp.Status)
+			}
+
+			b, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Println(resp.Status)
+			}
+			in := string(b)
+
+			if debug {
+				fmt.Printf("[DEBUG] Response:\n\n%v\n\n", in)
+			}
+
+			parser := xml.NewDecoder(bytes.NewBufferString(in))
+			
+			type ImageTag struct {
+				TagName string
+				Approved bool
+			}
+			
+			type Image struct {
+				Username string
+				Password string
+				ImageSource string
+				RepositoryUrl string
+				EmailAddress string
+				ApprovalAllImages bool
+				ImageName string
+				Tags []ImageTag `xml:"ImageVersion_Image>ImageTag"`
+			}
+			
+			type ListImagesResponse struct {
+				Images []Image `xml:"Image"`
+			}
+
+			type RespBody struct {
+				ListImagesResponse ListImagesResponse
+			}
+
+			type RespEnvelope struct {
+				Body RespBody 
+			}
+			
+			respEnvelope := new(RespEnvelope)
+			
+			parser.Decode(respEnvelope)
+			
+			w := new(tabwriter.Writer)
+			w.Init(os.Stdout, 12, 8, 1, ' ', 0)
+			// Table header
+			fmt.Fprintln(w, "NAME\tSOURCE\tEMAIL ADDRESS\tAPPROVE ALL?")
+			for _, image := range respEnvelope.Body.ListImagesResponse.Images {
+				fmt.Fprintf(w, "%v\t%v\t%v\t%v\n", image.ImageName, image.ImageSource, image.EmailAddress, image.ApprovalAllImages)
+			}
+			fmt.Fprintln(w)
+			w.Flush()
+			
+			//fmt.Println(respEnvelope)
+			
+			resp.Body.Close()
+		},
+	}
+	
+	//showImage
+	showImageCmd = &cobra.Command{
+		Use:   "showImage",
+		Short: "showImage",
+		Long:  "showImage",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("showImage")
+		},
+	}
+	
+	//listContainers
+	listContainersCmd = &cobra.Command{
+		Use:   "listContainers",
+		Short: "listContainers",
+		Long:  "listContainers",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listContainers")
+		},
+	}
+	
+	//showContainer
+	showContainerCmd = &cobra.Command{
+		Use:   "showContainer",
+		Short: "showContainer",
+		Long:  "showContainer",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("showContainer")
+		},
+	}
+	
+	//listHarbors
+	listHarborsCmd = &cobra.Command{
+		Use:   "listHarbors",
+		Short: "listHarbors",
+		Long:  "listHarbors",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listHarbors")
+		},
+	}
+	
+	//showHarbor
+	showHarborCmd = &cobra.Command{
+		Use:   "listImages",
+		Short: "listImages",
+		Long:  "listImages",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listImages")
+		},
+	}
+	
+	//listClusters
+	listClustersCmd = &cobra.Command{
+		Use:   "listClusters",
+		Short: "listClusters",
+		Long:  "listClusters",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listClusters")
+		},
+	}
+	
+	//showCluster
+	showClusterCmd = &cobra.Command{
+		Use:   "showCluster",
+		Short: "showCluster",
+		Long:  "showCluster",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("showCluster")
+		},
+	}
+	
+	//listEngines
+	listEnginesCmd = &cobra.Command{
+		Use:   "listEngines",
+		Short: "listEngines",
+		Long:  "listEngines",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listEngines")
+		},
+	}
+	
+	//showEngine
+	showEngineCmd = &cobra.Command{
+		Use:   "showEngine",
+		Short: "showEngine",
+		Long:  "showEngine",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("showEngine")
+		},
+	}
+	
+	//listShippingLanes
+	listShippingLanesCmd = &cobra.Command{
+		Use:   "listShippingLanes",
+		Short: "listShippingLanes",
+		Long:  "listShippingLanes",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listShippingLanes")
+		},
+	}
+	
+	//showShippingLane
+	showShippingLaneCmd = &cobra.Command{
+		Use:   "showShippingLane",
+		Short: "showShippingLane",
+		Long:  "showShippingLane",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("showShippingLane")
+		},
+	}
+	
+	//listVessels
+	listVesselsCmd = &cobra.Command{
+		Use:   "listVessels",
+		Short: "listVessels",
+		Long:  "listVessels",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("listVessels")
+		},
+	}
+	
+	//showVessel
+	showVesselCmd = &cobra.Command{
+		Use:   "showVessel",
+		Short: "showVessel",
+		Long:  "showVessel",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("showVessel")
+		},
+	}
+	
+	//deploy
+	deployCmd = &cobra.Command{
+		Use:   "deploy",
+		Short: "deploy",
+		Long:  "deploy",
+		Run:	func(cmd *cobra.Command, args []string) {
+			/*
+			fmt.Println(resp)
+			
+			if err != nil {
+				fmt.Println(err)
+			}
+			*/
+			fmt.Println("deploy")
+		},
+	}
+	
+	//stop
+	stopCmd = &cobra.Command{
+		Use:   "stop",
+		Short: "stop",
+		Long:  "stop",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("stop")
+		},
+	}
+	
+	//start
+	startCmd = &cobra.Command{
+		Use:   "start",
+		Short: "start",
+		Long:  "start",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("start")
+		},
+	}
+	
+	//restart
+	restartCmd = &cobra.Command{
+		Use:   "restart",
+		Short: "restart",
+		Long:  "restart",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("restart")
+		},
+	}
+	
+	//resize
+	resizeCmd = &cobra.Command{
+		Use:   "resize",
+		Short: "resize",
+		Long:  "resize",
+		Run:	func(cmd *cobra.Command, args []string) {
+			fmt.Println("resize")
+		},
+	}
+	
+	// MAIN
+	var craneCmd = &cobra.Command {
+		Use:	"crane",
+		Short:	"Crane is a command line tool for Harbormaster.",
+		Long:	"Crane is a command line tool for Harbormaster.\n\nUse this command to interact with the features provided by Harbormaster.",
+		Run:	func(cmd *cobra.Command, args []string) {
+			if (version) {
+				fmt.Println("Crane - The command line interface tool for Harbormaster - v0.1")
+			} else {
+				cmd.Help()
+			}
+		},
+	}
+	
+	craneCmd.Flags().BoolVarP(&version, "version", "v", false, "Shows the version of 'crane'.")
+	
+	craneCmd.AddCommand(loginCmd)
+	craneCmd.AddCommand(listImagesCmd)
+	craneCmd.AddCommand(showImageCmd)
+	craneCmd.AddCommand(listContainersCmd)
+	craneCmd.AddCommand(showContainerCmd)
+	craneCmd.AddCommand(listHarborsCmd)
+	craneCmd.AddCommand(showHarborCmd)
+	craneCmd.AddCommand(listClustersCmd)
+	craneCmd.AddCommand(showClusterCmd)
+	craneCmd.AddCommand(listEnginesCmd)
+	craneCmd.AddCommand(showEngineCmd)
+	craneCmd.AddCommand(listShippingLanesCmd)
+	craneCmd.AddCommand(showShippingLaneCmd)
+	craneCmd.AddCommand(listVesselsCmd)
+	craneCmd.AddCommand(showVesselCmd)
+	craneCmd.AddCommand(deployCmd)
+	craneCmd.AddCommand(stopCmd)
+	craneCmd.AddCommand(startCmd)
+	craneCmd.AddCommand(restartCmd)
+	craneCmd.AddCommand(resizeCmd)
+	
+	craneCmd.Execute()
 }
 
