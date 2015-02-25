@@ -8,23 +8,25 @@ TODO:
  - Template for help
  - Template for usage
  - Try to output the progress and some output sentences
-     * Implement the verbose option      
+     * Implement the verbose/debug option
+ - Controlar respuestas vacías y no mostrar nada
+ - Mostrar un login interactivo?
 */
 
 package main
 
 import (
-	"os"
+	//"os"
 	"fmt"
-	// More than logging is output
+	// More than logging it's output
 	//"log"
-	"bytes"
-	"net/http"
-	"io/ioutil"
-	"text/tabwriter"
+	//"bytes"
+	//"net/http"
+	//"io/ioutil"
+	//"text/tabwriter"
 	"encoding/xml"
 	"github.com/spf13/cobra"
-	//"github.com/MidVision/crane/webservices"
+	"github.com/MidVision/crane/subcommand"
 )
 
 type (
@@ -51,6 +53,9 @@ type (
 )
 
 var (
+	//CLI
+	cli *subcommand.CraneSubcommand
+
 	//SOAP Envelope
 	envelope *Envelope
 	
@@ -91,6 +96,8 @@ func init() {
 	envelope.CraneEnv = "http://getcrane.com/"
 	envelope.Header = EnvelopeHeader{}
 	envelope.Header.Credentials = Authentication{}
+	
+	cli = new(subcommand.CraneSubcommand)
 }
 
 func main() {
@@ -102,121 +109,26 @@ func main() {
 		Long:  "This command performs a login to the Harbormaster server.\n\nOnce logged in you won't need to run this command again unless you want to connect to a different server, the credentials are kept during the session.\n\nRunning this command again with different parameters will result in a new login to a different server losing the previous session.",
 		Run:	func(cmd *cobra.Command, args []string) {
 			if username != "" && password != "" && url != "" {
-				fmt.Println("\n************************************************")
-				fmt.Printf("* Login performed as '%s/%s' to '%s'.\n", username, password, url)
-				fmt.Println("************************************************")
+				cli.Login(&username, &password, &url)
 			} else {
+				fmt.Println("WARNING: You are missing some parameters.\n")
 				cmd.Help()
 			}
 		},
 	}
-	
+
 	// TODO: remove the default values
-	loginCmd.Flags().StringVarP(&username, "username", "", "harborWS", "User name to connect to Harbormaster.")
-	loginCmd.Flags().StringVarP(&password, "password", "", "123456Ab", "Password to connect to Harbormaster.")
-	loginCmd.Flags().StringVarP(&url, "url", "", "http://localhost:8080/ws/HarborMaster", "URL to Harbormaster.")
-	
+	loginCmd.Flags().StringVarP(&username, "username", "", "", "User name to connect to Harbormaster.")
+	loginCmd.Flags().StringVarP(&password, "password", "", "", "Password to connect to Harbormaster.")
+	loginCmd.Flags().StringVarP(&url, "url", "", "", "URL to Harbormaster.")
+
 	//listImages
 	listImagesCmd = &cobra.Command{
 		Use:   "listImages",
 		Short: "Shows the Repository Overview of Harbormaster.",
 		Long:  "This command shows all the Images contained in Harbormaster.",
 		Run:	func(cmd *cobra.Command, args []string) {
-			fmt.Println("Printing the list of available container images...\n")
-			
-			envelope.Header.Credentials.Username = username
-			envelope.Header.Credentials.Password = password
-			
-			type ListImages struct {}
-			
-			payload := ListImages{}
-
-			envelope.Body.Payload = payload
-			
-			buffer := &bytes.Buffer{}
-			encoder := xml.NewEncoder(buffer)
-			encoder.Indent("  ", "    ")
-			err := encoder.Encode(envelope)
-			if err != nil {
-				fmt.Println("Could not encode request")
-			}
-			
-			if debug {
-				fmt.Printf("[DEBUG] Request:\n\n%v\n\n", buffer)
-			}
-			
-			client := http.Client{}
-			req, err := http.NewRequest("POST", url, buffer)
-			if err != nil {
-				fmt.Println(err.Error())
-			}
-
-			req.Header.Add("Content-Type", "text/xml")
-			resp, err := client.Do(req)
-			if err != nil {
-				fmt.Println(err.Error())
-			}
-			if resp.StatusCode != 200 {
-				fmt.Println(resp.Status)
-			}
-
-			b, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				fmt.Println(resp.Status)
-			}
-			in := string(b)
-
-			if debug {
-				fmt.Printf("[DEBUG] Response:\n\n%v\n\n", in)
-			}
-
-			parser := xml.NewDecoder(bytes.NewBufferString(in))
-			
-			type ImageTag struct {
-				TagName string
-				Approved bool
-			}
-			
-			type Image struct {
-				Username string
-				Password string
-				ImageSource string
-				RepositoryUrl string
-				EmailAddress string
-				ApprovalAllImages bool
-				ImageName string
-				Tags []ImageTag `xml:"ImageVersion_Image>ImageTag"`
-			}
-			
-			type ListImagesResponse struct {
-				Images []Image `xml:"Image"`
-			}
-
-			type RespBody struct {
-				ListImagesResponse ListImagesResponse
-			}
-
-			type RespEnvelope struct {
-				Body RespBody 
-			}
-			
-			respEnvelope := new(RespEnvelope)
-			
-			parser.Decode(respEnvelope)
-			
-			w := new(tabwriter.Writer)
-			w.Init(os.Stdout, 12, 8, 1, ' ', 0)
-			// Table header
-			fmt.Fprintln(w, "NAME\tSOURCE\tEMAIL ADDRESS\tAPPROVE ALL?")
-			for _, image := range respEnvelope.Body.ListImagesResponse.Images {
-				fmt.Fprintf(w, "%v\t%v\t%v\t%v\n", image.ImageName, image.ImageSource, image.EmailAddress, image.ApprovalAllImages)
-			}
-			fmt.Fprintln(w)
-			w.Flush()
-			
-			//fmt.Println(respEnvelope)
-			
-			resp.Body.Close()
+			cli.ListImages()
 		},
 	}
 	
