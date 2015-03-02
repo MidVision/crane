@@ -16,14 +16,7 @@ TODO:
 package main
 
 import (
-	//"os"
 	"fmt"
-	// More than logging it's output
-	//"log"
-	//"bytes"
-	//"net/http"
-	//"io/ioutil"
-	//"text/tabwriter"
 	"encoding/xml"
 	"github.com/spf13/cobra"
 	"github.com/MidVision/crane/subcommand"
@@ -61,6 +54,7 @@ var (
 	
 	//Subcommand
 	loginCmd  *cobra.Command
+	logoutCmd  *cobra.Command
 	listImagesCmd  *cobra.Command
 	showImageCmd  *cobra.Command
 	listContainersCmd  *cobra.Command
@@ -83,7 +77,6 @@ var (
 	
 	//Flags
 	version bool
-	debug bool = false
 	
 	username string
 	password string
@@ -97,6 +90,7 @@ func init() {
 	envelope.Header = EnvelopeHeader{}
 	envelope.Header.Credentials = Authentication{}
 	
+	// Create the command line interface
 	cli = new(subcommand.CraneSubcommand)
 }
 
@@ -106,7 +100,7 @@ func main() {
 	loginCmd = &cobra.Command{
 		Use:   "login",
 		Short: "Performs a login to the Harbormaster server.",
-		Long:  "This command performs a login to the Harbormaster server.\n\nOnce logged in you won't need to run this command again unless you want to connect to a different server, the credentials are kept during the session.\n\nRunning this command again with different parameters will result in a new login to a different server losing the previous session.",
+		Long:  "This command performs a login to the Harbormaster server.\n\nOnce logged in you won't need to run this command again unless you want to connect to a different server or with a different user, the credentials are kept during the session.\n\nRunning this command again with different parameters will result in a new login to a different server or with a different user losing the previous session.",
 		Run:	func(cmd *cobra.Command, args []string) {
 			if username != "" && password != "" && url != "" {
 				cli.Login(&username, &password, &url)
@@ -117,16 +111,25 @@ func main() {
 		},
 	}
 
-	// TODO: remove the default values
 	loginCmd.Flags().StringVarP(&username, "username", "", "", "User name to connect to Harbormaster.")
 	loginCmd.Flags().StringVarP(&password, "password", "", "", "Password to connect to Harbormaster.")
-	loginCmd.Flags().StringVarP(&url, "url", "", "", "URL to Harbormaster.")
+	loginCmd.Flags().StringVarP(&url, "url", "", "", "URL to connect to Harbormaster (e.g. http://HOSTNAME:PORT).")
+
+	//logout
+	logoutCmd = &cobra.Command{
+		Use:   "logout",
+		Short: "Performs a logout from the Harbormaster server.",
+		Long:  "This command performs a logout from the Harbormaster server.\n\nOnce logged out you will need to perform a new login in order to use any Crane command.",
+		Run:	func(cmd *cobra.Command, args []string) {
+			cli.Logout()
+		},
+	}
 
 	//listImages
 	listImagesCmd = &cobra.Command{
 		Use:   "listImages",
 		Short: "Shows the Repository Overview of Harbormaster.",
-		Long:  "This command shows all the Images contained in Harbormaster.",
+		Long:  "This command shows all the container images managed in Harbormaster.",
 		Run:	func(cmd *cobra.Command, args []string) {
 			cli.ListImages()
 		},
@@ -322,8 +325,8 @@ func main() {
 	// MAIN
 	var craneCmd = &cobra.Command {
 		Use:	"crane",
-		Short:	"Crane is a command line tool for Harbormaster.",
-		Long:	"Crane is a command line tool for Harbormaster.\n\nUse this command to interact with the features provided by Harbormaster.",
+		Short:	"Crane is a command line interface tool for Harbormaster.",
+		Long:	"Crane is a command line interface tool for Harbormaster.\n\nUse this command tool to interact with the features provided by Harbormaster.",
 		Run:	func(cmd *cobra.Command, args []string) {
 			if (version) {
 				fmt.Println("Crane - The command line interface tool for Harbormaster - v0.1")
@@ -336,6 +339,7 @@ func main() {
 	craneCmd.Flags().BoolVarP(&version, "version", "v", false, "Shows the version of 'crane'.")
 	
 	craneCmd.AddCommand(loginCmd)
+	craneCmd.AddCommand(logoutCmd)
 	craneCmd.AddCommand(listImagesCmd)
 	craneCmd.AddCommand(showImageCmd)
 	craneCmd.AddCommand(listContainersCmd)

@@ -3,25 +3,26 @@ package subcommand
 import (
 	"os"
 	"fmt"
-	"bytes"
 	"strings"
-	"text/tabwriter"
+	"net/http"
 	"encoding/xml"
+	"text/tabwriter"
 )
 
 func (cli *CraneSubcommand) Login(username, password, url *string) {
-	fmt.Println("Logging in...\n")
-	
-	*url = *url + "/ws/HarborMaster"
-	
+
 	cli.username = *username
 	cli.password = *password
-	cli.url = *url
-	
-	in, _ := cli.call()
+	cli.Url = *url
 
-	parser := xml.NewDecoder(bytes.NewBufferString(in))
+	fmt.Printf("\nTrying to log in as user '%s' to '%s'...\n", *username, *url)
+
+	// CREATE BODY CONTENT FOR REQUEST
+	type EnvelopeBody struct {
+		Authentication string
+	}
 	
+	// CREATE RESPONSE STRUCTURE
 	type AuthenticationResponse struct {
 		Result string
 	}
@@ -32,35 +33,63 @@ func (cli *CraneSubcommand) Login(username, password, url *string) {
 	}
 	
 	type RespEnvelope struct {
-		Body 		RespBody
+		Body RespBody
 	}
 	
 	respEnvelope := new(RespEnvelope)
 	
-	parser.Decode(respEnvelope)
+	// CALL WEB SERVICE AND	DECODE RESPONSE
+	resData, statusCode, err := cli.call("POST", EnvelopeBody{})
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 	
-	//resp.Body.Close()
+	if statusCode != 200 {
+		fmt.Printf("Unable to connect to server '%s'.\n\n", cli.Url)
+		fmt.Printf("Server returned response code %v: %v\n\n", statusCode, http.StatusText(statusCode))
+		fmt.Println("Please check the credentials.\n")
+		os.Exit(1)
+	}
 
+	err = xml.Unmarshal(resData, &respEnvelope)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	// PRINT TABLE
 	w := new(tabwriter.Writer)
 	w.Init(os.Stdout, 0, 8, 1, '*', 0)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "\t\t\n")
-	if strings.Contains(respEnvelope.Body.AuthenticationResponse.Result, *username) {
-		fmt.Fprintf(w, "\t Login successful as '%s' to '%s' \t\n", *username, *url + "/ws/HarborMaster")
+	if strings.Contains(respEnvelope.Body.AuthenticationResponse.Result, cli.username) {
+		fmt.Fprintf(w, "\t Login successful as '%s' to '%s' \t\n", cli.username, cli.Url)
 	} else {
 		fmt.Fprintf(w, "\t %s \t\n", respEnvelope.Body.Fault.Faultstring)
 	}
 	fmt.Fprintf(w, "\t\t\n")
 	fmt.Fprintln(w)
 	w.Flush()
+	
+	// SAVE LOGIN CONFIGURATION
+	if err := cli.saveLoginFile(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
 
-/* 
-{
-	"https://index.docker.io/v1/":
-		{
-			"auth":"bWlkdmlzaW9uOm0xZHYxczFvbg==",
-			"email":"support@midvision.com"
-		}
-} 
-*/
+func (cli *CraneSubcommand) Logout() {
+	if err := cli.removeLoginFile(); err != nil {
+		fmt.Println("\nWARNING: NO LOGIN SESSION FOUND!\n\nPlease, perform a new login before requesting any action.\n")
+	} else {
+		w := new(tabwriter.Writer)
+		w.Init(os.Stdout, 0, 8, 1, '*', 0)
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "\t\t\n")
+		fmt.Fprintf(w, "\t Logged out successfully! \t\n")
+		fmt.Fprintf(w, "\t\t\n")
+		fmt.Fprintln(w)
+		w.Flush()
+	}
+}

@@ -3,11 +3,18 @@ package subcommand
 import (
 	"os"
 	"fmt"
+	"path"
 	"bytes"
-	"runtime"
+	"net/url"
 	"net/http"
 	"io/ioutil"
 	"encoding/xml"
+	"encoding/json"
+)
+
+const (
+	LOGINFILE = ".crane"
+	WSRELPATH = "/ws/HarborMaster"
 )
 
 type (
@@ -34,23 +41,23 @@ type (
 		Faultcode 	string `xml:"faultcode"`
 		Faultstring string `xml:"faultstring"`
 	}
-	
+
 	RespEnvelope interface{}
 
 	// CLI
 	CraneSubcommand struct {
-		url 	string
-		auth 	string
-		// TODO: remove
-		username string
-		password string
+		Url 		string	`json:"url"`
+		Token		string	`json:"token"`
+		username	string	`json:",omitempty"`
+		password	string	`json:",omitempty"`
 	}
 )
 
 var (
 	envelope *Envelope
-	
-	debug bool = true
+
+	// For debugging purposes only
+	debug bool = false
 )
 
 func init() {
@@ -61,68 +68,102 @@ func init() {
 	envelope.Header.Credentials = Authentication{}
 }
 
-func (cli *CraneSubcommand) LoadLoginFile() error {
+func (cli *CraneSubcommand) loadLoginFile() error {
+	loginFilePath := path.Join(getHome(), LOGINFILE)
+	
+	if _, err := os.Stat(loginFilePath); err != nil {
+		return fmt.Errorf("\nERROR: NO LOGIN FOUND!\n\nPlease, perform a login before requesting any action.\n")
+	}
+
+	content, err := ioutil.ReadFile(loginFilePath)
+	if err != nil {
+		return fmt.Errorf("\nERROR: INVALID LOGIN FOUND!\n\nPlease, perform a new login before requesting any action.\n")
+	}
+
+	if err := json.Unmarshal(content, cli); err != nil {
+		return fmt.Errorf("\nERROR: INVALID LOGIN FOUND!\n\nPlease, perform a new login before requesting any action.\n")
+	} else {
+		cli.username, cli.password, err = decodeToken(cli.Token)
+		cli.Token = ""
+		if err != nil {
+			return fmt.Errorf("\nERROR: INVALID LOGIN FOUND!\n\nPlease, perform a new login before requesting any action.\n")
+		}
+	}
 	return nil
 }
 
-func (cli *CraneSubcommand) SaveLoginFile() error {
+func (cli *CraneSubcommand) saveLoginFile() error {
+	loginFilePath := path.Join(getHome(), LOGINFILE)
+	
+	cli.Token = encodeToken(cli.username, cli.password)
+	cli.username = ""
+	cli.password = ""
+
+	content, err := json.MarshalIndent(cli, "", "\t")
+	if err != nil {
+		return err
+	} else {
+		err = ioutil.WriteFile(loginFilePath, content, 0600)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func (cli *CraneSubcommand) call() (string, error) {
+func (cli *CraneSubcommand) removeLoginFile() error {
+	loginFilePath := path.Join(getHome(), LOGINFILE)
+	return os.Remove(loginFilePath)
+}
 
+func (cli *CraneSubcommand) call(method string, bodyContent interface{}) ([]byte, int, error) {
+
+	// SET CREDENTIALS
 	envelope.Header.Credentials.Username = cli.username
 	envelope.Header.Credentials.Password = cli.password
-	
-	type EnvelopeBody struct {
-		Authentication string
-	}
-	
-	envelope.Body = EnvelopeBody{}
-	
-	buffer := &bytes.Buffer{}
-	encoder := xml.NewEncoder(buffer)
-	encoder.Indent("  ", "    ")
-	err := encoder.Encode(envelope)
+
+	// SET BODY CONTENT
+	envelope.Body = bodyContent
+
+	// ENCODE REQUEST
+	reqData, err := xml.MarshalIndent(envelope, "  ", "    ")
 	if err != nil {
-		fmt.Println("Could not encode request")
+		return nil, -1, err
 	}
-	
+
 	if debug {
-		fmt.Printf("[DEBUG] Request:\n\n%v\n\n", buffer)
+		fmt.Printf("[DEBUG] Request:\n\n%v\n\n", string(reqData))
 	}
-	
+
+	// SETUP CALL
 	client := http.Client{}
-	req, err := http.NewRequest("POST", cli.url, buffer)
+	req, err := http.NewRequest(method, WSRELPATH, bytes.NewBuffer(reqData))
 	if err != nil {
-		fmt.Println(err.Error())
+		return nil, -1, fmt.Errorf("Error creating request: \n\n%v\n", err)
 	}
+	u, err := url.Parse(cli.Url)
+	if err != nil {
+		return nil, -1, fmt.Errorf("Error parsing URL provided '%s': \n\n%v\n", cli.Url, err)
+	}
+	req.URL.Host = u.Host
+	req.URL.Scheme = u.Scheme
 
 	req.Header.Add("Content-Type", "text/xml")
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println(err.Error())
+		return nil, -1, fmt.Errorf("Error trying to connect to '%s': \n\n%v\n", cli.Url, err)
 	}
 
-	if resp.StatusCode != 200 {
-		fmt.Println(resp.Status)
-	}
-
-	b, err := ioutil.ReadAll(resp.Body)
+	resData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println(resp.Status)
+		return nil, -1, err
 	}
-	in := string(b)
 
 	if debug {
-		fmt.Printf("[DEBUG] Response:\n\n%v\n\n", in)
+		fmt.Printf("[DEBUG] Response:\n\n%v\n\n", string(resData))
 	}
-	return in, nil
-}
 
-func getHome() string {
-	if runtime.GOOS == "windows" {
-		return os.Getenv("USERPROFILE")
-	}
-	return os.Getenv("HOME")
+	resp.Body.Close()
+
+	return resData, resp.StatusCode, nil
 }
